@@ -1,0 +1,130 @@
+@import 'tailwindcss';
+
+/* ============================================================
+ * Design Tokens — tema oscuro (default)
+ * Fuente: DESIGN_SYSTEM.md §3.1
+ * ============================================================ */
+@theme {
+  --color-bg-primary: #07101f;
+  --color-bg-card: #0d1b2e;
+  --color-bg-surface: #112240;
+  --color-accent: #00c8ff;
+  --color-accent2: #3b82f6;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-text: #e8f4ff;
+  --color-muted: #7a9bb5;
+  --color-border: #1e3a5f;
+
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ============================================================
+ * Design Tokens — tema claro
+ * Fuente: DESIGN_SYSTEM.md §3.2
+ * ============================================================ */
+[data-theme='light'] {
+  --color-bg-primary: #f5f7fa;
+  --color-bg-card: #ffffff;
+  --color-bg-surface: #edf0f5;
+  --color-accent: #0094cc;
+  --color-accent2: #2563eb;
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-text: #1e293b;
+  --color-muted: #64748b;
+  --color-border: #e2e8f0;
+}
+
+/* ============================================================
+ * Base globales
+ * ============================================================ */
+@layer base {
+  html {
+    color-scheme: dark light;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg-primary);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  *:focus-visible {
+    outline: none;
+  }
+
+  /* Scrollbar sutil (DESIGN_SYSTEM.md §16.5) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted);
+  }
+}
+
+/* ============================================================
+ * Animaciones utilitarias (se activaran con clases en Fase 5+)
+ * Fuente: DESIGN_SYSTEM.md §13
+ * ============================================================ */
+@layer utilities {
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.4s ease-out both;
+  }
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out both;
+  }
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-bg-surface) 0%,
+      color-mix(in srgb, var(--color-bg-surface) 70%, var(--color-border)) 50%,
+      var(--color-bg-surface) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite linear;
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "formularios-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plataforma de formularios operativos ADN — migracion desde Microsoft Forms",
+  "type": "module",
+  "workspaces": [
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently --names api,web --prefix-colors cyan,magenta \"npm run dev -w api\" \"npm run dev -w web\"",
+    "dev:api": "npm run dev -w api",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w api && npm run build -w web",
+    "type-check": "npm run type-check -w api && npm run type-check -w web",
+    "db:generate": "npm run db:generate -w api",
+    "db:push": "npm run db:push -w api",
+    "db:seed": "npm run db:seed -w api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

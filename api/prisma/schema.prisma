@@ -1,0 +1,12 @@
+// Prisma schema de la BD de plataforma (auth, permisos, auditoria).
+// La BD operativa BDADN no esta aqui — se consulta via driver mssql con SPs.
+// Fase 2 agregara los modelos Usuario, UsuarioFormPermiso, SubmissionLog, NotificationQueue.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}

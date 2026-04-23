@@ -1,6 +1,7 @@
 // Prisma schema de la BD de plataforma (auth, permisos, auditoria).
 // La BD operativa BDADN no esta aqui — se consulta via driver mssql con SPs.
-// Fase 2 agregara los modelos Usuario, UsuarioFormPermiso, SubmissionLog, NotificationQueue.
+// Compatible SQLite (dev) / SQL Server (prod): fechas como DateTime,
+// IDs UUID, soft-delete en tablas operativas.
 
 generator client {
   provider = "prisma-client-js"
@@ -9,4 +10,70 @@ generator client {
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+// Usuario de la plataforma. Se auto-provisiona al primer login via Entra ID.
+model Usuario {
+  id         String    @id @default(uuid())
+  email      String    @unique
+  nombre     String
+  rol        String // "administrador" | "jefe_de_patio" | "operativo"
+  activo     Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime?
+
+  permisosExtra UsuarioFormPermiso[]
+  submissions   SubmissionLog[]
+
+  @@index([rol])
+  @@index([activo])
+}
+
+// Formularios adicionales habilitados a un jefe de patio.
+// Solo aplica al rol "jefe_de_patio"; admin ve todo, operativo se limita a la lista base.
+model UsuarioFormPermiso {
+  usuario_id String
+  form_slug  String // uno de los 6 slugs "admin-only" (ver src/lib/roles.ts)
+  created_at DateTime @default(now())
+  created_by String // email del admin que asigno el permiso
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@id([usuario_id, form_slug])
+  @@index([form_slug])
+}
+
+// Auditoria de cada submission (exito o error). El payload se guarda
+// como JSON para trazabilidad completa.
+model SubmissionLog {
+  id            String   @id @default(uuid())
+  usuario_id    String
+  usuario_email String // desnormalizado para auditoria estable aun si el usuario se borra
+  form_slug     String
+  sp_name       String
+  payload_json  String // JSON.stringify del body validado
+  result        String // "ok" | "error"
+  error_message String?
+  duration_ms   Int
+  created_at    DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id])
+
+  @@index([form_slug, created_at])
+  @@index([usuario_id, created_at])
+  @@index([result, created_at])
+}
+
+// Cola de notificaciones (correos de error principalmente).
+// El worker que las envia se implementa en Fase 8.
+model NotificationQueue {
+  id            String    @id @default(uuid())
+  submission_id String?
+  kind          String // "error_submit" | "success"
+  payload_json  String
+  sent_at       DateTime?
+  created_at    DateTime  @default(now())
+
+  @@index([sent_at])
 }

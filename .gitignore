@@ -1,0 +1,52 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+
+# Output de analisis de BD (puede contener definiciones sensibles y listas de datos)
+db_analysis_output/
+
+# Node / frontend (se usaran en Fase 1+)
+node_modules/
+dist/
+build/
+.vite/
+.next/
+coverage/
+
+# SQLite / Prisma (dev)
+*.db
+*.db-journal
+api/prisma/dev.db*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Claude Code
+.claude_sessions/

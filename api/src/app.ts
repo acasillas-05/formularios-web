@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import { config } from './config.js';
 import { authMiddleware } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
+import { formsRouter } from './routes/forms.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -47,6 +48,7 @@ export function createApp(): express.Express {
   app.use('/api', authMiddleware);
 
   app.use('/api/auth', authRouter);
+  app.use('/api/forms', formsRouter);
 
   // 404 final — cualquier /api/* sin match cae aqui y devuelve JSON.
   app.use((_req: Request, res: Response) => {

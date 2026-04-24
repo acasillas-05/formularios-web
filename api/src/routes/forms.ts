@@ -1,65 +1,109 @@
 import { Router, type Request, type Response } from 'express';
-import { z } from 'zod';
 
+import { buildSpExecution, zodFromFields } from '../forms/engine.js';
+import { getFormDefinition, getFormsForUser, getPublicDefinition } from '../forms/registry.js';
+import { isFormSlug } from '../lib/roles.js';
+import { canAccessSlug } from '../middleware/rbac.js';
 import { executeAndAudit } from '../services/auditService.js';
 
 export const formsRouter: Router = Router();
 
 /**
- * Endpoint temporal de Fase 3. En Fase 4 se reemplaza por un handler
- * generico /api/forms/:slug/submit que lee la FormDefinition del registry.
- *
- * POST /api/forms/registrar-unidad-adn/submit
- * Body: { NombreProveedor, NumEconomicoInput, PlacaInput }
- * Llama sp_InsertarPlaca con TipoProveedor='Transportista'.
+ * GET /api/forms - lista resumida de forms que el usuario puede ver.
+ * Misma data que /api/auth/me.forms, util cuando la UI la quiere refrescar.
  */
-const registrarUnidadAdnBody = z.object({
-  NombreProveedor: z.string().trim().min(1).max(100),
-  NumEconomicoInput: z.string().trim().min(1).max(50),
-  PlacaInput: z.string().trim().min(1).max(50),
+formsRouter.get('/', async (req: Request, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ ok: false, error: 'No autenticado' });
+    return;
+  }
+  const forms = await getFormsForUser(req.user);
+  res.json({ ok: true, forms });
 });
 
-formsRouter.post('/registrar-unidad-adn/submit', async (req: Request, res: Response) => {
+/**
+ * GET /api/forms/:slug - FormPublicDefinition completa (fields para el renderer).
+ * Valida permiso. 404 si slug no existe en el registry.
+ */
+formsRouter.get('/:slug', async (req: Request, res: Response) => {
+  const slug = req.params.slug;
+  if (!isFormSlug(slug)) {
+    res.status(404).json({ ok: false, error: 'Formulario desconocido' });
+    return;
+  }
+  if (!req.user) {
+    res.status(401).json({ ok: false, error: 'No autenticado' });
+    return;
+  }
+  const allowed = await canAccessSlug(req.user, slug);
+  if (!allowed) {
+    res.status(403).json({ ok: false, error: 'No tienes permiso para este formulario' });
+    return;
+  }
+  const def = getPublicDefinition(slug);
+  if (!def) {
+    res.status(404).json({ ok: false, error: 'Formulario sin definicion (pendiente de implementacion)' });
+    return;
+  }
+  res.json({ ok: true, form: def });
+});
+
+/**
+ * POST /api/forms/:slug/submit - ejecuta el SP declarado en FormDefinition.
+ * Pipeline: auth -> rbac -> zod -> buildSpExecution -> executeAndAudit.
+ */
+formsRouter.post('/:slug/submit', async (req: Request, res: Response) => {
+  const slug = req.params.slug;
+  if (!isFormSlug(slug)) {
+    res.status(404).json({ ok: false, error: 'Formulario desconocido' });
+    return;
+  }
   if (!req.user) {
     res.status(401).json({ ok: false, error: 'No autenticado' });
     return;
   }
 
-  const parsed = registrarUnidadAdnBody.safeParse(req.body);
+  const allowed = await canAccessSlug(req.user, slug);
+  if (!allowed) {
+    res.status(403).json({ ok: false, error: 'No tienes permiso para este formulario' });
+    return;
+  }
+
+  const def = getFormDefinition(slug);
+  if (!def) {
+    res.status(404).json({ ok: false, error: 'Formulario sin definicion (pendiente de implementacion)' });
+    return;
+  }
+
+  const schema = zodFromFields(def.fields);
+  const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
       ok: false,
       error: 'Body invalido',
-      issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+      issues: parsed.error.issues.map((i) => ({
+        path: i.path.join('.'),
+        message: i.message,
+      })),
     });
     return;
   }
 
-  const body = parsed.data;
+  const body = parsed.data as Record<string, unknown>;
+
   const audited = await executeAndAudit({
     user: req.user,
-    formSlug: 'registrar-unidad-adn',
+    formSlug: slug,
     payload: body,
-    execution: {
-      spName: 'sp_InsertarPlaca',
-      inputs: [
-        { name: 'NombreProveedor', type: { kind: 'NVARCHAR', length: 100 }, value: body.NombreProveedor },
-        { name: 'NumEconomicoInput', type: { kind: 'NVARCHAR', length: 50 }, value: body.NumEconomicoInput },
-        { name: 'PlacaInput', type: { kind: 'NVARCHAR', length: 50 }, value: body.PlacaInput },
-        { name: 'TipoProveedor', type: { kind: 'NVARCHAR', length: 50 }, value: 'Transportista' },
-      ],
-      outputs: [
-        { name: 'Status', type: { kind: 'INT' } },
-        { name: 'Error', type: { kind: 'NVARCHAR', length: 'MAX' } },
-      ],
-    },
+    execution: buildSpExecution(def, body),
+    resultsetConvention: def.submit.resultsetConvention,
   });
 
   if (!audited.ok) {
     res.status(400).json({
       ok: false,
       status: audited.status,
-      error: audited.message ?? 'Error al registrar la unidad',
+      error: audited.message ?? 'Error al procesar el formulario',
       submissionId: audited.submissionId,
     });
     return;
@@ -69,6 +113,11 @@ formsRouter.post('/registrar-unidad-adn/submit', async (req: Request, res: Respo
     ok: true,
     status: audited.status,
     submissionId: audited.submissionId,
+    successMessage: def.successMessage,
+    // Exponer recordsets + output para que el frontend pueda mostrar info especifica
+    // (ej. IDProveedorAsignado devuelto por sp_InsertarProveedor).
+    output: audited.spResult.output,
+    recordset: audited.spResult.recordset,
     durationMs: audited.spResult.durationMs,
   });
 });

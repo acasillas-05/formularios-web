@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 
-import { getFormSummaries } from '../forms/registry.js';
-import { getSlugsForUser } from '../middleware/rbac.js';
+import { getFormsForUser } from '../forms/registry.js';
 
 export const authRouter: Router = Router();
 
@@ -15,7 +14,7 @@ authRouter.get('/me', async (req: Request, res: Response) => {
     return;
   }
 
-  const slugs = await getSlugsForUser(req.user);
+  const forms = await getFormsForUser(req.user);
 
   res.json({
     ok: true,
@@ -25,6 +24,6 @@ authRouter.get('/me', async (req: Request, res: Response) => {
       nombre: req.user.nombre,
       rol: req.user.rol,
     },
-    forms: getFormSummaries(slugs),
+    forms,
   });
 });

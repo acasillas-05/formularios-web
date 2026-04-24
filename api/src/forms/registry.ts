@@ -1,67 +1,60 @@
+import type { Usuario } from '@prisma/client';
+
+import { type FormDefinition, type FormPublicDefinition, toPublicDefinition } from '../lib/formTypes.js';
 import { type FormSlug } from '../lib/roles.js';
+import { getSlugsForUser } from '../middleware/rbac.js';
+
+import { placaRemolque } from './definitions/placaRemolque.js';
+import { registrarOperadorAdn } from './definitions/registrarOperadorAdn.js';
+import { registrarOperadorCliente } from './definitions/registrarOperadorCliente.js';
+import { registrarUnidadAdn } from './definitions/registrarUnidadAdn.js';
+import { registrarUnidadCliente } from './definitions/registrarUnidadCliente.js';
 
 /**
- * Metadata minima de cada formulario. Suficiente para mostrar la lista al usuario
- * tras el login. Las FormDefinition completas (campos, SP, validaciones) se
- * agregan en Fase 4 en archivos separados bajo src/forms/definitions/.
+ * Fuente de verdad de las FormDefinition implementadas.
+ * Los slugs declarados en FORM_SLUGS (roles.ts) que aun no tienen definicion
+ * aqui no son navegables — se agregan conforme se implementan por tandas.
  */
-export type FormSummary = {
+const REGISTRY: Partial<Record<FormSlug, FormDefinition>> = {
+  'registrar-unidad-adn': registrarUnidadAdn,
+  'registrar-unidad-cliente': registrarUnidadCliente,
+  'registrar-operador-adn': registrarOperadorAdn,
+  'registrar-operador-cliente': registrarOperadorCliente,
+  'placa-remolque': placaRemolque,
+};
+
+export function getFormDefinition(slug: FormSlug): FormDefinition | null {
+  return REGISTRY[slug] ?? null;
+}
+
+export function getPublicDefinition(slug: FormSlug): FormPublicDefinition | null {
+  const def = REGISTRY[slug];
+  return def ? toPublicDefinition(def) : null;
+}
+
+export function listImplementedSlugs(): FormSlug[] {
+  return Object.keys(REGISTRY) as FormSlug[];
+}
+
+export type FormListItem = {
   slug: FormSlug;
   title: string;
   subtitle: string;
 };
 
-const ENTRIES: Record<FormSlug, Omit<FormSummary, 'slug'>> = {
-  'registrar-unidad-adn': {
-    title: 'Registrar Unidades (Transportista ADN)',
-    subtitle: 'Registrar unidades de transporte propio.',
-  },
-  'registrar-unidad-cliente': {
-    title: 'Registrar Unidades (Transportista Cliente)',
-    subtitle: 'Registrar unidades de transporte del cliente.',
-  },
-  'registrar-operador-adn': {
-    title: 'Registrar Operadores (Transportista ADN)',
-    subtitle: 'Registrar operadores de transporte propio.',
-  },
-  'registrar-operador-cliente': {
-    title: 'Registrar Operadores (Transportista Cliente)',
-    subtitle: 'Registrar operadores de transporte del cliente.',
-  },
-  'placa-remolque': {
-    title: 'Placa Remolque',
-    subtitle: 'Registrar placas de remolque (solo ADN Transporte).',
-  },
-  'eliminar-tara': {
-    title: 'Eliminar Tara',
-    subtitle: 'Eliminar un registro de la tabla Tara por FolioProcesoCarga.',
-  },
-  'registrar-proveedor': {
-    title: 'Registrar Proveedor',
-    subtitle: 'Registrar lineas transportistas y proveedores de materia prima.',
-  },
-  'habilitar-concat-rem': {
-    title: 'Habilitar Concatenado Remision Externa',
-    subtitle: 'Habilitar o deshabilitar el envio de remision externa concatenada.',
-  },
-  'eliminar-entrada-lre': {
-    title: 'Eliminar Entrada LRE',
-    subtitle: 'Eliminar Entradas y LotesRealesEntrada.',
-  },
-  'eliminar-salida-tara-lrs': {
-    title: 'Eliminar Salida - Tara - LotesRealesSalida',
-    subtitle: 'Eliminar una salida dada una Entrega (borra LRS, Salida y Tara asociada).',
-  },
-  'permitir-pesaje-manual': {
-    title: 'Permitir Pesaje Manual',
-    subtitle: 'Activar o desactivar pesaje manual por centro.',
-  },
-};
-
-export function getFormSummary(slug: FormSlug): FormSummary {
-  return { slug, ...ENTRIES[slug] };
+function toListItem(def: FormDefinition): FormListItem {
+  return { slug: def.slug, title: def.title, subtitle: def.subtitle };
 }
 
-export function getFormSummaries(slugs: readonly FormSlug[]): FormSummary[] {
-  return slugs.map(getFormSummary);
+/**
+ * Lista ligera (solo slug/title/subtitle) de formularios que el usuario puede ver.
+ * Usada por /api/auth/me y /api/forms. La FormPublicDefinition completa se pide
+ * on-demand en /api/forms/:slug.
+ */
+export async function getFormsForUser(user: Usuario): Promise<FormListItem[]> {
+  const allowed = await getSlugsForUser(user);
+  const implemented = new Set(listImplementedSlugs());
+  return allowed
+    .filter((slug) => implemented.has(slug))
+    .map((slug) => toListItem(REGISTRY[slug] as FormDefinition));
 }

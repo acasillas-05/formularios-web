@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { Outlet } from 'react-router';
 
 import { Spinner } from '../ui/Spinner';
+import { Toaster } from '../ui/Toaster';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 
@@ -23,6 +24,7 @@ export function PlatformLayout() {
           </Suspense>
         </main>
       </div>
+      <Toaster />
     </div>
   );
 }

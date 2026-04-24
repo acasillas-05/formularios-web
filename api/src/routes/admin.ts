@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { Router, type Request, type Response } from 'express';
 
 import { ADMIN_ONLY_SLUGS, isFormSlug } from '../lib/roles.js';
+import { getPool } from '../mssql.js';
 import { prisma } from '../prisma.js';
 import {
   createUserSchema,
@@ -267,4 +268,57 @@ adminRouter.get('/submissions/:id', async (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true, submission });
+});
+
+/* =========================================================
+ * Notificaciones pendientes
+ * ========================================================= */
+
+adminRouter.get('/notifications', async (_req: Request, res: Response) => {
+  const [pending, lastSent] = await Promise.all([
+    prisma.notificationQueue.findMany({
+      where: { sent_at: null },
+      orderBy: { created_at: 'asc' },
+      take: 50,
+    }),
+    prisma.notificationQueue.findMany({
+      where: { sent_at: { not: null } },
+      orderBy: { sent_at: 'desc' },
+      take: 20,
+    }),
+  ]);
+  res.json({ ok: true, pending, lastSent });
+});
+
+/* =========================================================
+ * Diagnostics (health profundo, ping a BD plataforma + BDADN)
+ * ========================================================= */
+
+type CheckStatus = { ok: boolean; latency_ms?: number; error?: string };
+
+async function timed(fn: () => Promise<unknown>): Promise<CheckStatus> {
+  const start = Date.now();
+  try {
+    await fn();
+    return { ok: true, latency_ms: Date.now() - start };
+  } catch (err) {
+    return { ok: false, latency_ms: Date.now() - start, error: err instanceof Error ? err.message : 'error' };
+  }
+}
+
+adminRouter.get('/diagnostics', async (_req: Request, res: Response) => {
+  const [platformDb, bdadn] = await Promise.all([
+    timed(() => prisma.$queryRaw`SELECT 1`),
+    timed(async () => {
+      const pool = await getPool();
+      await pool.request().query('SELECT 1 AS ok');
+    }),
+  ]);
+  const ok = platformDb.ok && bdadn.ok;
+  res.status(ok ? 200 : 503).json({
+    ok,
+    platformDb,
+    bdadn,
+    timestamp: new Date().toISOString(),
+  });
 });

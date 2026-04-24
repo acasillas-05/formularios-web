@@ -6,11 +6,30 @@ import helmet from 'helmet';
 
 import { config } from './config.js';
 import { authMiddleware } from './middleware/auth.js';
+import { requestLogger } from './middleware/logging.js';
 import { requireAdmin } from './middleware/rbac.js';
 import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { catalogosRouter } from './routes/catalogos.js';
 import { formsRouter } from './routes/forms.js';
+
+/**
+ * Rate limit estricto para POST /api/forms/:slug/submit.
+ * Clave por usuario autenticado; fallback a IP si el request llega sin auth
+ * (no deberia suceder tras authMiddleware, pero es defensa en profundidad).
+ */
+const submitLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
+  message: { ok: false, error: 'Demasiadas peticiones. Espera un momento.' },
+});
+
+function isSubmitRoute(req: Request): boolean {
+  return req.method === 'POST' && req.path.endsWith('/submit');
+}
 
 export function createApp(): express.Express {
   const app = express();
@@ -20,6 +39,8 @@ export function createApp(): express.Express {
 
   app.use(helmet());
   app.use(compression());
+  app.use(requestLogger);
+
   app.use(
     '/api',
     rateLimit({
@@ -50,6 +71,15 @@ export function createApp(): express.Express {
   // Todas las demas rutas /api/* requieren autenticacion (Entra ID o DEV_BYPASS).
   app.use('/api', authMiddleware);
 
+  // Rate limit mas estricto especifico de submit (60 por minuto por usuario).
+  app.use('/api/forms', (req, res, next) => {
+    if (isSubmitRoute(req)) {
+      submitLimiter(req, res, next);
+      return;
+    }
+    next();
+  });
+
   app.use('/api/auth', authRouter);
   app.use('/api/forms', formsRouter);
   app.use('/api/catalogos', catalogosRouter);
@@ -60,20 +90,26 @@ export function createApp(): express.Express {
     res.status(404).json({ ok: false, error: 'Not Found' });
   });
 
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     const status =
       err instanceof Error && 'status' in err && typeof (err as { status?: unknown }).status === 'number'
         ? (err as { status: number }).status
         : 500;
     const message = err instanceof Error ? err.message : 'Internal Server Error';
+    const requestId = req.id;
 
-    if (!config.isProduction) {
-      console.error('[error]', err);
-    }
+    // Log completo del lado del servidor (incluye stack cuando aplique).
+    console.error(
+      `[error] id=${requestId?.slice(0, 8)} status=${status} ${req.method} ${req.path} user=${req.user?.email ?? '-'}`,
+      err instanceof Error ? err.stack ?? err.message : err,
+    );
 
+    // El body de respuesta NUNCA expone stack. En prod, errores 5xx se enmascaran.
+    const exposeMessage = !config.isProduction || status < 500;
     res.status(status).json({
       ok: false,
-      error: config.isProduction && status >= 500 ? 'Internal Server Error' : message,
+      error: exposeMessage ? message : 'Internal Server Error',
+      requestId,
     });
   });
 

@@ -14,6 +14,18 @@ const FormPage = lazy(() =>
 const NotFoundPage = lazy(() =>
   import('./modules/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
 );
+const AdminGuard = lazy(() =>
+  import('./modules/admin/AdminGuard').then((m) => ({ default: m.AdminGuard })),
+);
+const UsersPage = lazy(() =>
+  import('./modules/admin/UsersPage').then((m) => ({ default: m.UsersPage })),
+);
+const UserFormPage = lazy(() =>
+  import('./modules/admin/UserFormPage').then((m) => ({ default: m.UserFormPage })),
+);
+const SubmissionsPage = lazy(() =>
+  import('./modules/admin/SubmissionsPage').then((m) => ({ default: m.SubmissionsPage })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,6 +47,17 @@ const router = createBrowserRouter([
           { index: true, element: <Navigate to="/formularios" replace /> },
           { path: 'formularios', element: <FormsListPage /> },
           { path: 'formularios/:slug', element: <FormPage /> },
+          {
+            path: 'admin',
+            element: <AdminGuard />,
+            children: [
+              { index: true, element: <Navigate to="/admin/users" replace /> },
+              { path: 'users', element: <UsersPage /> },
+              { path: 'users/new', element: <UserFormPage /> },
+              { path: 'users/:id', element: <UserFormPage /> },
+              { path: 'auditoria', element: <SubmissionsPage /> },
+            ],
+          },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

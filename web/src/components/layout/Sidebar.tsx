@@ -1,10 +1,22 @@
-import { ChevronLeft, ChevronRight, FileText, LayoutDashboard } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  History,
+  LayoutDashboard,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
 import { NavLink } from 'react-router';
 
 import { cn } from '../../lib/cn';
 import { useAppStore } from '../../store/appStore';
+import { useAuthStore } from '../../store/authStore';
 
-const NAV_GROUPS = [
+type NavItem = { to: string; icon: LucideIcon; label: string; disabled?: boolean };
+type NavGroup = { label: string; items: NavItem[]; adminOnly?: boolean };
+
+const GROUPS: NavGroup[] = [
   {
     label: 'Operacion',
     items: [
@@ -12,11 +24,23 @@ const NAV_GROUPS = [
       { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', disabled: true },
     ],
   },
+  {
+    label: 'Administracion',
+    adminOnly: true,
+    items: [
+      { to: '/admin/users', icon: Users, label: 'Usuarios' },
+      { to: '/admin/auditoria', icon: History, label: 'Auditoria' },
+    ],
+  },
 ];
 
 export function Sidebar() {
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggle = useAppStore((s) => s.toggleSidebar);
+  const rol = useAuthStore((s) => s.user?.rol);
+  const isAdmin = rol === 'administrador';
+
+  const visibleGroups = GROUPS.filter((g) => !g.adminOnly || isAdmin);
 
   return (
     <aside
@@ -45,13 +69,15 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4">
-        {NAV_GROUPS.map((group) => (
+        {visibleGroups.map((group) => (
           <div key={group.label} className="mb-6 last:mb-0">
             {!collapsed ? (
               <div className="px-4 mb-2 text-xs uppercase tracking-wider text-muted/60">
                 {group.label}
               </div>
-            ) : null}
+            ) : (
+              <div className="mx-auto mb-2 w-6 h-px bg-border" />
+            )}
             <ul className="flex flex-col gap-0.5 px-2">
               {group.items.map((item) => (
                 <li key={item.to}>
@@ -102,10 +128,14 @@ export function Sidebar() {
           )}
           aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
         >
-          {collapsed ? <ChevronRight size={18} /> : <>
-            <ChevronLeft size={18} />
-            <span>Colapsar</span>
-          </>}
+          {collapsed ? (
+            <ChevronRight size={18} />
+          ) : (
+            <>
+              <ChevronLeft size={18} />
+              <span>Colapsar</span>
+            </>
+          )}
         </button>
       </div>
     </aside>

@@ -6,6 +6,8 @@ import helmet from 'helmet';
 
 import { config } from './config.js';
 import { authMiddleware } from './middleware/auth.js';
+import { requireAdmin } from './middleware/rbac.js';
+import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { catalogosRouter } from './routes/catalogos.js';
 import { formsRouter } from './routes/forms.js';
@@ -51,6 +53,7 @@ export function createApp(): express.Express {
   app.use('/api/auth', authRouter);
   app.use('/api/forms', formsRouter);
   app.use('/api/catalogos', catalogosRouter);
+  app.use('/api/admin', requireAdmin, adminRouter);
 
   // 404 final — cualquier /api/* sin match cae aqui y devuelve JSON.
   app.use((_req: Request, res: Response) => {

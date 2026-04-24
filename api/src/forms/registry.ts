@@ -4,16 +4,21 @@ import { type FormDefinition, type FormPublicDefinition, toPublicDefinition } fr
 import { type FormSlug } from '../lib/roles.js';
 import { getSlugsForUser } from '../middleware/rbac.js';
 
+import { eliminarEntradaLre } from './definitions/eliminarEntradaLre.js';
+import { eliminarSalidaTaraLrs } from './definitions/eliminarSalidaTaraLrs.js';
+import { eliminarTara } from './definitions/eliminarTara.js';
+import { habilitarConcatRem } from './definitions/habilitarConcatRem.js';
+import { permitirPesajeManual } from './definitions/permitirPesajeManual.js';
 import { placaRemolque } from './definitions/placaRemolque.js';
 import { registrarOperadorAdn } from './definitions/registrarOperadorAdn.js';
 import { registrarOperadorCliente } from './definitions/registrarOperadorCliente.js';
+import { registrarProveedor } from './definitions/registrarProveedor.js';
 import { registrarUnidadAdn } from './definitions/registrarUnidadAdn.js';
 import { registrarUnidadCliente } from './definitions/registrarUnidadCliente.js';
 
 /**
  * Fuente de verdad de las FormDefinition implementadas.
- * Los slugs declarados en FORM_SLUGS (roles.ts) que aun no tienen definicion
- * aqui no son navegables — se agregan conforme se implementan por tandas.
+ * Los 11 formularios que reemplazan a Microsoft Forms.
  */
 const REGISTRY: Partial<Record<FormSlug, FormDefinition>> = {
   'registrar-unidad-adn': registrarUnidadAdn,
@@ -21,6 +26,12 @@ const REGISTRY: Partial<Record<FormSlug, FormDefinition>> = {
   'registrar-operador-adn': registrarOperadorAdn,
   'registrar-operador-cliente': registrarOperadorCliente,
   'placa-remolque': placaRemolque,
+  'eliminar-tara': eliminarTara,
+  'registrar-proveedor': registrarProveedor,
+  'habilitar-concat-rem': habilitarConcatRem,
+  'eliminar-entrada-lre': eliminarEntradaLre,
+  'eliminar-salida-tara-lrs': eliminarSalidaTaraLrs,
+  'permitir-pesaje-manual': permitirPesajeManual,
 };
 
 export function getFormDefinition(slug: FormSlug): FormDefinition | null {

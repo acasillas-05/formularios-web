@@ -28,7 +28,9 @@ function baseSchemaForType(type: FieldType): z.ZodTypeAny {
       return type.kind === 'text' && type.uppercase ? s.transform((v) => v.toUpperCase()) : s;
     }
     case 'number': {
-      let s: z.ZodNumber = type.integer ? z.number().int() : z.number();
+      // Coerce strings a numbers: los <input type="number"> del HTML envian string.
+      // z.coerce.number() en zod 4 devuelve ZodCoercedNumber (no ZodNumber).
+      let s = type.integer ? z.coerce.number().int() : z.coerce.number();
       if (type.min !== undefined) s = s.min(type.min);
       if (type.max !== undefined) s = s.max(type.max);
       if (!type.allowNegative && type.min === undefined) s = s.min(0);

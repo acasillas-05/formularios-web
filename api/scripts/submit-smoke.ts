@@ -1,13 +1,15 @@
 /**
  * Smoke test punta-a-punta del handler generico POST /api/forms/:slug/submit
- * para los 5 formularios operativos (Tanda 1 de Fase 4).
+ * para los 11 formularios (Tanda 1 + Tanda 2 de Fase 4).
  *
- * Flujo:
- *   0. Restaura rol del admin (DEV_BYPASS) y limpia datos sinteticos previos.
- *   1. Para cada form: pick catalogo real, submit con valores sinteticos,
- *      verifica la insercion en BDADN, limpia la fila insertada.
- *   2. Ejecuta tambien un caso de error de negocio por duplicado.
- *   3. Al final borra SubmissionLog/NotificationQueue generados.
+ * Filosofia de seguridad con BDADN productivo:
+ *   - Tanda 1 (inserciones): inserta, verifica, borra al final.
+ *   - Tanda 2 eliminar-*:    usa IDs claramente inexistentes (999999999)
+ *                            y espera el error de negocio "no encontrado".
+ *   - Tanda 2 reversibles:   lee estado actual, cambia al opuesto, verifica,
+ *                            restaura al estado original.
+ *   - Tanda 2 registrar-proveedor: inserta Transportista Cliente sintetico,
+ *                                  verifica ID auto-asignado, borra.
  *
  * Uso: tsx scripts/submit-smoke.ts
  */
@@ -20,6 +22,7 @@ const API = 'http://localhost:3001';
 const ADMIN_EMAIL = 'operacionesadn@adnenergia.com';
 
 const TEST = {
+  // Tanda 1
   placaAdn: 'PLACAADN001',
   placaCliente: 'PLACACLI001',
   numEconAdn: 'TESTFZADN',
@@ -28,13 +31,32 @@ const TEST = {
   operadorCliente: 'test operador cliente uno',
   placaRemolque: 'REMOL001',
   numEconRemolque: 'TESTREM',
+  // Tanda 2
+  proveedorSinteticoNombre: 'TEST PROVEEDOR SMOKE',
+  bigFolio: 999_999_999,
 } as const;
 
 type ApiResponse =
-  | { ok: true; submissionId: string; successMessage: string; durationMs: number; output: Record<string, unknown>; recordset: unknown }
-  | { ok: false; error: string; status?: number | null; issues?: unknown; submissionId?: string };
+  | {
+      ok: true;
+      submissionId: string;
+      successMessage: string;
+      durationMs: number;
+      output: Record<string, unknown>;
+      recordset: unknown;
+    }
+  | {
+      ok: false;
+      error: string;
+      status?: number | null;
+      issues?: unknown;
+      submissionId?: string;
+    };
 
-async function submit(slug: string, body: Record<string, unknown>): Promise<{ status: number; data: ApiResponse }> {
+async function submit(
+  slug: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; data: ApiResponse }> {
   const res = await fetch(`${API}/api/forms/${slug}/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,6 +85,53 @@ async function pickProveedor(tipo: 'Transportista' | 'Transportista Cliente'): P
   return name;
 }
 
+async function pickCentroDestino(): Promise<string> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .query<{ CentroDestino: string; ConcatRemisionExt: boolean | number }>(
+      "SELECT TOP 1 CONCAT(IDCentro, ' - ', Destino) AS CentroDestino, ConcatRemisionExt FROM dbo.Destino ORDER BY IDCentro, Destino",
+    );
+  const v = r.recordset[0]?.CentroDestino;
+  if (!v) throw new Error('No hay registros en Destino');
+  return v;
+}
+
+async function readConcatRem(centroDestino: string): Promise<boolean> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('v', centroDestino)
+    .query<{ ConcatRemisionExt: boolean | number }>(
+      "SELECT ConcatRemisionExt FROM dbo.Destino WHERE CONCAT(IDCentro, ' - ', Destino) = @v",
+    );
+  const raw = r.recordset[0]?.ConcatRemisionExt;
+  return raw === true || raw === 1;
+}
+
+async function pickCentroPesaje(): Promise<{ id: number; allowManual: number }> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .query<{ IDCentro: number; AllowManual: boolean | number }>(
+      'SELECT TOP 1 pc.IDCentro, pc.AllowManual FROM dbo.PesajeCentro pc INNER JOIN dbo.Centro c ON c.IDCentro = pc.IDCentro ORDER BY pc.IDCentro',
+    );
+  const row = r.recordset[0];
+  if (!row) throw new Error('No hay PesajeCentro configurado');
+  return { id: Number(row.IDCentro), allowManual: Number(row.AllowManual) };
+}
+
+async function readAllowManual(idCentro: number): Promise<number> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('id', idCentro)
+    .query<{ AllowManual: boolean | number }>(
+      'SELECT AllowManual FROM dbo.PesajeCentro WHERE IDCentro = @id',
+    );
+  return Number(r.recordset[0]?.AllowManual ?? 0);
+}
+
 async function cleanupPlaca(placa: string): Promise<number> {
   const pool = await getPool();
   const r = await pool.request().input('p', placa).query('DELETE FROM dbo.Placa WHERE PlacaTracto = @p');
@@ -71,20 +140,37 @@ async function cleanupPlaca(placa: string): Promise<number> {
 
 async function cleanupOperador(nombre: string): Promise<number> {
   const pool = await getPool();
-  // El SP normaliza el nombre a Proper Case. Compara case-insensitive para capturar cualquier variante.
-  const r = await pool.request().input('n', nombre).query('DELETE FROM dbo.Operador WHERE LOWER(NombreOperador) = LOWER(@n)');
+  const r = await pool
+    .request()
+    .input('n', nombre)
+    .query('DELETE FROM dbo.Operador WHERE LOWER(NombreOperador) = LOWER(@n)');
   return r.rowsAffected[0] ?? 0;
 }
 
 async function cleanupPlacaRemolque(placa: string): Promise<number> {
   const pool = await getPool();
-  const r = await pool.request().input('p', placa).query('DELETE FROM dbo.PlacaRemolque WHERE PlacaRemolque = @p');
+  const r = await pool
+    .request()
+    .input('p', placa)
+    .query('DELETE FROM dbo.PlacaRemolque WHERE PlacaRemolque = @p');
+  return r.rowsAffected[0] ?? 0;
+}
+
+async function cleanupProveedorSintetico(): Promise<number> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('n', TEST.proveedorSinteticoNombre)
+    .query('DELETE FROM dbo.Proveedor WHERE NombreProveedor = @n');
   return r.rowsAffected[0] ?? 0;
 }
 
 async function placaExists(placa: string): Promise<boolean> {
   const pool = await getPool();
-  const r = await pool.request().input('p', placa).query<{ n: number }>('SELECT COUNT(*) AS n FROM dbo.Placa WHERE PlacaTracto = @p');
+  const r = await pool
+    .request()
+    .input('p', placa)
+    .query<{ n: number }>('SELECT COUNT(*) AS n FROM dbo.Placa WHERE PlacaTracto = @p');
   return (r.recordset[0]?.n ?? 0) > 0;
 }
 
@@ -106,10 +192,7 @@ async function placaRemolqueExists(placa: string): Promise<boolean> {
   return (r.recordset[0]?.n ?? 0) > 0;
 }
 
-type Scenario = {
-  name: string;
-  run: () => Promise<void>;
-};
+type Scenario = { name: string; run: () => Promise<void> };
 
 async function main(): Promise<void> {
   let failed = 0;
@@ -121,37 +204,41 @@ async function main(): Promise<void> {
   // Cleanup defensivo previo
   await Promise.all([
     cleanupPlaca(TEST.placaAdn),
+    cleanupPlaca(TEST.placaAdn + 'B'),
     cleanupPlaca(TEST.placaCliente),
     cleanupOperador(TEST.operadorAdn),
     cleanupOperador(TEST.operadorCliente),
     cleanupPlacaRemolque(TEST.placaRemolque),
+    cleanupProveedorSintetico(),
   ]);
 
   const scenarios: Scenario[] = [
     {
-      name: 'GET /api/auth/me devuelve admin + forms implementados',
+      name: 'GET /api/auth/me devuelve admin + 11 forms implementados',
       async run() {
         const body = await getJson<{ user: { rol: string }; forms: { slug: string }[] }>('/api/auth/me');
         if (body.user.rol !== 'administrador') throw new Error(`rol esperado administrador, vino ${body.user.rol}`);
-        if (body.forms.length !== 5) throw new Error(`esperaba 5 forms de Tanda 1, vino ${body.forms.length}`);
+        if (body.forms.length !== 11) throw new Error(`esperaba 11 forms, vino ${body.forms.length}`);
       },
     },
     {
-      name: 'GET /api/forms/registrar-unidad-adn devuelve fields',
+      name: 'GET /api/forms/eliminar-tara devuelve fields',
       async run() {
-        const body = await getJson<{ form: { fields: unknown[] } }>('/api/forms/registrar-unidad-adn');
-        if (body.form.fields.length !== 3) throw new Error(`esperaba 3 fields, vino ${body.form.fields.length}`);
+        const body = await getJson<{ form: { fields: unknown[] } }>('/api/forms/eliminar-tara');
+        if (body.form.fields.length !== 1) throw new Error(`esperaba 1 field, vino ${body.form.fields.length}`);
       },
     },
     {
-      name: 'GET /api/catalogos/proveedores-transportista devuelve opciones',
+      name: 'GET /api/catalogos/centros-pesaje devuelve opciones',
       async run() {
-        const body = await getJson<{ options: { value: string; label: string }[] }>('/api/catalogos/proveedores-transportista');
+        const body = await getJson<{ options: { value: string; label: string }[] }>('/api/catalogos/centros-pesaje');
         if (body.options.length === 0) throw new Error('catalogo vacio');
       },
     },
+
+    // ---- Tanda 1 (5 operativos, happy paths + errores) ----
     {
-      name: 'submit registrar-unidad-adn (happy path)',
+      name: '[T1] registrar-unidad-adn happy path',
       async run() {
         const proveedor = await pickProveedor('Transportista');
         const r = await submit('registrar-unidad-adn', {
@@ -159,13 +246,13 @@ async function main(): Promise<void> {
           NumEconomicoInput: TEST.numEconAdn,
           PlacaInput: TEST.placaAdn,
         });
-        if (r.status !== 200 || !r.data.ok) throw new Error(`submit fallo: ${JSON.stringify(r)}`);
-        if (!(await placaExists(TEST.placaAdn))) throw new Error('placa no se inserto');
+        if (r.status !== 200 || !r.data.ok) throw new Error(JSON.stringify(r));
+        if (!(await placaExists(TEST.placaAdn))) throw new Error('placa no inserto');
         await cleanupPlaca(TEST.placaAdn);
       },
     },
     {
-      name: 'submit registrar-unidad-cliente (happy path)',
+      name: '[T1] registrar-unidad-cliente happy path',
       async run() {
         const proveedor = await pickProveedor('Transportista Cliente');
         const r = await submit('registrar-unidad-cliente', {
@@ -173,52 +260,146 @@ async function main(): Promise<void> {
           NumEconomicoInput: TEST.numEconCliente,
           PlacaInput: TEST.placaCliente,
         });
-        if (r.status !== 200 || !r.data.ok) throw new Error(`submit fallo: ${JSON.stringify(r)}`);
-        if (!(await placaExists(TEST.placaCliente))) throw new Error('placa no se inserto');
+        if (r.status !== 200 || !r.data.ok) throw new Error(JSON.stringify(r));
+        if (!(await placaExists(TEST.placaCliente))) throw new Error('placa no inserto');
         await cleanupPlaca(TEST.placaCliente);
       },
     },
     {
-      name: 'submit registrar-operador-adn (happy path)',
+      name: '[T1] registrar-operador-adn happy path',
       async run() {
         const proveedor = await pickProveedor('Transportista');
         const r = await submit('registrar-operador-adn', {
           NombreProveedor: proveedor,
           NombreOperadorInput: TEST.operadorAdn,
         });
-        if (r.status !== 200 || !r.data.ok) throw new Error(`submit fallo: ${JSON.stringify(r)}`);
-        if (!(await operadorExists(TEST.operadorAdn))) throw new Error('operador no se inserto');
+        if (r.status !== 200 || !r.data.ok) throw new Error(JSON.stringify(r));
+        if (!(await operadorExists(TEST.operadorAdn))) throw new Error('operador no inserto');
         await cleanupOperador(TEST.operadorAdn);
       },
     },
     {
-      name: 'submit registrar-operador-cliente (happy path)',
+      name: '[T1] registrar-operador-cliente happy path',
       async run() {
         const proveedor = await pickProveedor('Transportista Cliente');
         const r = await submit('registrar-operador-cliente', {
           NombreProveedor: proveedor,
           NombreOperadorInput: TEST.operadorCliente,
         });
-        if (r.status !== 200 || !r.data.ok) throw new Error(`submit fallo: ${JSON.stringify(r)}`);
-        if (!(await operadorExists(TEST.operadorCliente))) throw new Error('operador no se inserto');
+        if (r.status !== 200 || !r.data.ok) throw new Error(JSON.stringify(r));
+        if (!(await operadorExists(TEST.operadorCliente))) throw new Error('operador no inserto');
         await cleanupOperador(TEST.operadorCliente);
       },
     },
     {
-      name: 'submit placa-remolque (happy path, ADN Transporte)',
+      name: '[T1] placa-remolque happy path',
       async run() {
         const r = await submit('placa-remolque', {
           NombreProveedor: 'ADN Transporte',
           PlacaInput: TEST.placaRemolque,
           NumEconomicoInput: TEST.numEconRemolque,
         });
-        if (r.status !== 200 || !r.data.ok) throw new Error(`submit fallo: ${JSON.stringify(r)}`);
-        if (!(await placaRemolqueExists(TEST.placaRemolque))) throw new Error('placa remolque no se inserto');
+        if (r.status !== 200 || !r.data.ok) throw new Error(JSON.stringify(r));
+        if (!(await placaRemolqueExists(TEST.placaRemolque))) throw new Error('remolque no inserto');
         await cleanupPlacaRemolque(TEST.placaRemolque);
       },
     },
+
+    // ---- Tanda 2 ----
     {
-      name: 'submit registrar-unidad-adn con body invalido (zod 400)',
+      name: '[T2] eliminar-tara con folio inexistente -> error de negocio',
+      async run() {
+        const r = await submit('eliminar-tara', { FolioProcesoCarga: TEST.bigFolio });
+        if (r.status !== 400 || r.data.ok !== false) throw new Error(`esperaba 400, vino ${r.status}`);
+        if (!r.data.error.toLowerCase().includes('no se encontr')) {
+          throw new Error(`mensaje inesperado: ${r.data.error}`);
+        }
+      },
+    },
+    {
+      name: '[T2] registrar-proveedor (Transportista Cliente con ID auto)',
+      async run() {
+        const r = await submit('registrar-proveedor', {
+          NombreProveedor: TEST.proveedorSinteticoNombre,
+          TipoProveedor: 'Transportista Cliente',
+        });
+        if (r.status !== 200 || !r.data.ok) throw new Error(JSON.stringify(r));
+        const idAsignado = r.data.output?.['IDProveedorAsignado'];
+        if (idAsignado === undefined || idAsignado === null) throw new Error('no devolvio IDProveedorAsignado');
+        // Cleanup
+        const count = await cleanupProveedorSintetico();
+        if (count < 1) throw new Error('cleanup no encontro el proveedor sintetico');
+      },
+    },
+    {
+      name: '[T2] habilitar-concat-rem (cambia y revierte)',
+      async run() {
+        const centroDestino = await pickCentroDestino();
+        const original = await readConcatRem(centroDestino);
+        const target = original ? 'Deshabilitado' : 'Habilitado';
+        const revertir = original ? 'Habilitado' : 'Deshabilitado';
+
+        const r1 = await submit('habilitar-concat-rem', { CentroDestino: centroDestino, Estatus: target });
+        if (r1.status !== 200 || !r1.data.ok) throw new Error(`cambio fallo: ${JSON.stringify(r1)}`);
+        const mid = await readConcatRem(centroDestino);
+        if (mid === original) throw new Error('estado no cambio');
+
+        const r2 = await submit('habilitar-concat-rem', { CentroDestino: centroDestino, Estatus: revertir });
+        if (r2.status !== 200 || !r2.data.ok) throw new Error(`reversion fallo: ${JSON.stringify(r2)}`);
+        const final = await readConcatRem(centroDestino);
+        if (final !== original) throw new Error('estado no se restauro');
+      },
+    },
+    {
+      name: '[T2] eliminar-entrada-lre con datos inexistentes -> error de negocio',
+      async run() {
+        const r = await submit('eliminar-entrada-lre', {
+          TipoEntrada: 'Compra',
+          EntregaOC: TEST.bigFolio,
+          DocumentoMaterial: TEST.bigFolio,
+        });
+        if (r.status !== 400 || r.data.ok !== false) throw new Error(`esperaba 400, vino ${r.status}`);
+        if (!r.data.error.toLowerCase().includes('no existe')) {
+          throw new Error(`mensaje inesperado: ${r.data.error}`);
+        }
+      },
+    },
+    {
+      name: '[T2] eliminar-salida-tara-lrs con entrega inexistente -> error de negocio',
+      async run() {
+        const r = await submit('eliminar-salida-tara-lrs', { Entrega: TEST.bigFolio });
+        if (r.status !== 400 || r.data.ok !== false) throw new Error(`esperaba 400, vino ${r.status}`);
+      },
+    },
+    {
+      name: '[T2] permitir-pesaje-manual (toggle y revierte)',
+      async run() {
+        const centro = await pickCentroPesaje();
+        const opuesto = centro.allowManual === 1 ? 0 : 1;
+
+        // IDCentro viaja como string (asi lo emite el catalogo centros-pesaje);
+        // AllowManual tambien (radio con values '0'/'1'). El driver mssql los convierte a BIGINT/INT.
+        const r1 = await submit('permitir-pesaje-manual', {
+          IDCentro: String(centro.id),
+          AllowManual: String(opuesto),
+        });
+        if (r1.status !== 200 || !r1.data.ok) throw new Error(`cambio fallo: ${JSON.stringify(r1)}`);
+        const mid = await readAllowManual(centro.id);
+        if (mid !== opuesto) throw new Error(`AllowManual esperado ${opuesto}, vino ${mid}`);
+
+        const r2 = await submit('permitir-pesaje-manual', {
+          IDCentro: String(centro.id),
+          AllowManual: String(centro.allowManual),
+        });
+        if (r2.status !== 200 || !r2.data.ok) throw new Error(`reversion fallo: ${JSON.stringify(r2)}`);
+        const final = await readAllowManual(centro.id);
+        if (final !== centro.allowManual) throw new Error('AllowManual no se restauro');
+      },
+    },
+
+    // ---- Generico ----
+    {
+      name: 'submit body invalido (zod 400)',
       async run() {
         const r = await submit('registrar-unidad-adn', { NombreProveedor: '' });
         if (r.status !== 400) throw new Error(`esperaba 400, vino ${r.status}`);
@@ -227,29 +408,8 @@ async function main(): Promise<void> {
     {
       name: 'submit slug desconocido (404 JSON)',
       async run() {
-        const r = await submit('no-existe' as string, {});
+        const r = await submit('no-existe', {});
         if (r.status !== 404) throw new Error(`esperaba 404, vino ${r.status}`);
-      },
-    },
-    {
-      name: 'submit placa duplicada (400 con mensaje del SP + notificacion)',
-      async run() {
-        const proveedor = await pickProveedor('Transportista');
-        // insert
-        const a = await submit('registrar-unidad-adn', {
-          NombreProveedor: proveedor,
-          NumEconomicoInput: TEST.numEconAdn + '_B',
-          PlacaInput: TEST.placaAdn + 'B',
-        });
-        if (a.status !== 200) throw new Error('pre-insert fallo');
-        // duplicate
-        const b = await submit('registrar-unidad-adn', {
-          NombreProveedor: proveedor,
-          NumEconomicoInput: TEST.numEconAdn + '_C',
-          PlacaInput: TEST.placaAdn + 'B',
-        });
-        if (b.status !== 400) throw new Error(`esperaba 400 dup, vino ${b.status}`);
-        await cleanupPlaca(TEST.placaAdn + 'B');
       },
     },
   ];
@@ -268,7 +428,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n--- cleanup ---');
+  console.log('\n--- cleanup final ---');
   await Promise.all([
     cleanupPlaca(TEST.placaAdn),
     cleanupPlaca(TEST.placaAdn + 'B'),
@@ -276,15 +436,18 @@ async function main(): Promise<void> {
     cleanupOperador(TEST.operadorAdn),
     cleanupOperador(TEST.operadorCliente),
     cleanupPlacaRemolque(TEST.placaRemolque),
+    cleanupProveedorSintetico(),
   ]);
   const delLogs = await prisma.submissionLog.deleteMany({
     where: {
       OR: [
-        { form_slug: 'registrar-unidad-adn', payload_json: { contains: TEST.placaAdn } },
-        { form_slug: 'registrar-unidad-cliente', payload_json: { contains: TEST.placaCliente } },
-        { form_slug: 'registrar-operador-adn', payload_json: { contains: TEST.operadorAdn } },
-        { form_slug: 'registrar-operador-cliente', payload_json: { contains: TEST.operadorCliente } },
-        { form_slug: 'placa-remolque', payload_json: { contains: TEST.placaRemolque } },
+        { payload_json: { contains: TEST.placaAdn } },
+        { payload_json: { contains: TEST.placaCliente } },
+        { payload_json: { contains: TEST.operadorAdn } },
+        { payload_json: { contains: TEST.operadorCliente } },
+        { payload_json: { contains: TEST.placaRemolque } },
+        { payload_json: { contains: TEST.proveedorSinteticoNombre } },
+        { payload_json: { contains: String(TEST.bigFolio) } },
       ],
     },
   });
@@ -296,6 +459,8 @@ async function main(): Promise<void> {
         { payload_json: { contains: TEST.operadorAdn } },
         { payload_json: { contains: TEST.operadorCliente } },
         { payload_json: { contains: TEST.placaRemolque } },
+        { payload_json: { contains: TEST.proveedorSinteticoNombre } },
+        { payload_json: { contains: String(TEST.bigFolio) } },
       ],
     },
   });

@@ -1,0 +1,94 @@
+// Schema de produccion (Azure SQL Server). MIRROR EXACTO de schema.prisma
+// salvo por el provider y el output del client (que va a la misma carpeta
+// node_modules/@prisma/client, asi que el codigo no cambia).
+//
+// Workflow:
+//   - dev:  prisma migrate dev (usa schema.prisma con sqlite)
+//   - prod: prisma migrate deploy --schema prisma/schema.prod.prisma
+//           (usa schema.prod.prisma con sqlserver)
+// Las migraciones de cada provider viven en directorios separados:
+//   - prisma/migrations/             (sqlite, dev)
+//   - prisma/migrations-sqlserver/   (sqlserver, prod)
+//
+// CRITICO: cualquier cambio de modelos debe replicarse en AMBOS schemas.
+// Si quitas un campo aqui, quitalo tambien en schema.prisma.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id         String    @id @default(uuid())
+  email      String    @unique
+  nombre     String
+  rol        String
+  activo     Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime?
+
+  permisosExtra UsuarioFormPermiso[]
+  submissions   SubmissionLog[]
+
+  @@index([rol])
+  @@index([activo])
+}
+
+model UsuarioFormPermiso {
+  usuario_id String
+  form_slug  String
+  created_at DateTime @default(now())
+  created_by String
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@id([usuario_id, form_slug])
+  @@index([form_slug])
+}
+
+model SubmissionLog {
+  id            String   @id @default(uuid())
+  usuario_id    String
+  usuario_email String
+  form_slug     String
+  sp_name       String
+  payload_json  String   @db.NVarChar(Max)
+  result        String
+  error_message String?  @db.NVarChar(Max)
+  duration_ms   Int
+  created_at    DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id])
+
+  @@index([form_slug, created_at])
+  @@index([usuario_id, created_at])
+  @@index([result, created_at])
+}
+
+model NotificationQueue {
+  id            String    @id @default(uuid())
+  submission_id String?
+  kind          String
+  payload_json  String    @db.NVarChar(Max)
+  sent_at       DateTime?
+  created_at    DateTime  @default(now())
+
+  @@index([sent_at])
+}
+
+// Notas SQL Server especificas:
+//
+// 1. payload_json y error_message usan @db.NVarChar(Max) explicito porque
+//    SQL Server por default mapea String a NVARCHAR(1000) que se queda corto
+//    para JSONs grandes y mensajes de stack.
+//
+// 2. uuid() de Prisma genera GUIDs en codigo (no NEWID() del servidor),
+//    se almacena como NVARCHAR(36).
+//
+// 3. created_at/updated_at son DATETIME2 en SQL Server. Las queries que
+//    filtran por fecha deben pasar Date objects (Prisma los serializa OK).

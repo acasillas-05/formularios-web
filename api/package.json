@@ -7,12 +7,16 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "build:prod": "prisma generate --schema prisma/schema.prod.prisma && tsc",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit",
     "db:generate": "prisma generate",
+    "db:generate:prod": "prisma generate --schema prisma/schema.prod.prisma",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:migrate:prod": "prisma migrate dev --schema prisma/schema.prod.prisma",
+    "db:deploy:prod": "prisma migrate deploy --schema prisma/schema.prod.prisma"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

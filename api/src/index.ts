@@ -1,8 +1,10 @@
 import { createApp } from './app.js';
-import { config } from './config.js';
+import { assertProductionConfig, config } from './config.js';
 import { closePool } from './mssql.js';
 import { prisma } from './prisma.js';
 import { startNotificationWorker } from './services/notifyService.js';
+
+assertProductionConfig();
 
 const app = createApp();
 

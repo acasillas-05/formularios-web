@@ -1,0 +1,41 @@
+# Build context relativo al ROOT del monorepo, asi que ignoramos por path
+# desde la raiz. El context se pasa como `.` al hacer build con
+# `docker build -f api/Dockerfile .`.
+
+# Node + builds
+node_modules
+**/node_modules
+**/dist
+**/build
+
+# Frontend completo (no se necesita para el API)
+web
+
+# Secrets (NUNCA empacar en imagen)
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.production.example
+
+# Prisma generado y BD local
+**/dev.db*
+**/db_analysis_output
+**/prisma/migrations/dev.db*
+
+# Python venv del analisis de BD
+venv
+
+# Tooling local
+.git
+.github
+.vscode
+.idea
+.claude_sessions
+
+# Logs y caches
+*.log
+.cache
+.npm
+.eslintcache
+.tsbuildinfo
+**/.tmp

@@ -48,6 +48,11 @@ export const listSubmissionsQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+export const statsQuerySchema = z.object({
+  /** Ventana en dias hacia atras desde ahora. Default 30, max 90. */
+  days: z.coerce.number().int().min(1).max(90).default(30),
+});
+
 export type CreateUserBody = z.infer<typeof createUserSchema>;
 export type UpdateUserBody = z.infer<typeof updateUserSchema>;
 export type SetPermissionsBody = z.infer<typeof setPermissionsSchema>;

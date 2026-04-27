@@ -14,7 +14,7 @@ import { cn } from '../../lib/cn';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 
-type NavItem = { to: string; icon: LucideIcon; label: string; disabled?: boolean };
+type NavItem = { to: string; icon: LucideIcon; label: string; disabled?: boolean; adminOnly?: boolean };
 type NavGroup = { label: string; items: NavItem[]; adminOnly?: boolean };
 
 const GROUPS: NavGroup[] = [
@@ -22,7 +22,7 @@ const GROUPS: NavGroup[] = [
     label: 'Operacion',
     items: [
       { to: '/formularios', icon: FileText, label: 'Formularios' },
-      { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', disabled: true },
+      { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', adminOnly: true },
     ],
   },
   {
@@ -81,7 +81,9 @@ export function Sidebar() {
               <div className="mx-auto mb-2 w-6 h-px bg-border" />
             )}
             <ul className="flex flex-col gap-0.5 px-2">
-              {group.items.map((item) => (
+              {group.items
+                .filter((item) => !item.adminOnly || isAdmin)
+                .map((item) => (
                 <li key={item.to}>
                   {item.disabled ? (
                     <div

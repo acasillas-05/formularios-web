@@ -9,6 +9,7 @@ import {
   listSubmissionsQuerySchema,
   listUsersQuerySchema,
   setPermissionsSchema,
+  statsQuerySchema,
   updateUserSchema,
 } from '../schemas/admin.js';
 
@@ -343,5 +344,138 @@ adminRouter.get('/diagnostics', async (_req: Request, res: Response) => {
     platformDb,
     bdadn,
     timestamp: new Date().toISOString(),
+  });
+});
+
+/* =========================================================
+ * Stats / dashboard
+ * ========================================================= */
+
+function startOfDayUtc(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function percentile(sortedAsc: number[], p: number): number {
+  if (sortedAsc.length === 0) return 0;
+  const idx = Math.min(sortedAsc.length - 1, Math.floor((p / 100) * sortedAsc.length));
+  return sortedAsc[idx] ?? 0;
+}
+
+adminRouter.get('/stats', async (req: Request, res: Response) => {
+  const parsed = statsQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, error: 'Query invalido', issues: parsed.error.issues });
+    return;
+  }
+  const { days } = parsed.data;
+
+  const now = new Date();
+  const todayStart = startOfDayUtc(now);
+  const windowStart = new Date(todayStart.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+  const [
+    today,
+    last24hOk,
+    last24hErr,
+    windowOk,
+    windowErr,
+    byForm,
+    byUser,
+    durations,
+    rangeRows,
+    activeUsers,
+    pendingNotifs,
+  ] = await Promise.all([
+    prisma.submissionLog.count({ where: { created_at: { gte: todayStart } } }),
+    prisma.submissionLog.count({ where: { created_at: { gte: last24h }, result: 'ok' } }),
+    prisma.submissionLog.count({ where: { created_at: { gte: last24h }, result: 'error' } }),
+    prisma.submissionLog.count({ where: { created_at: { gte: windowStart }, result: 'ok' } }),
+    prisma.submissionLog.count({ where: { created_at: { gte: windowStart }, result: 'error' } }),
+    prisma.submissionLog.groupBy({
+      by: ['form_slug', 'result'],
+      _count: { _all: true },
+      where: { created_at: { gte: windowStart } },
+    }),
+    prisma.submissionLog.groupBy({
+      by: ['usuario_email'],
+      _count: { _all: true },
+      where: { created_at: { gte: windowStart } },
+      orderBy: { _count: { usuario_email: 'desc' } },
+      take: 5,
+    }),
+    prisma.submissionLog.findMany({
+      select: { duration_ms: true },
+      where: { created_at: { gte: windowStart } },
+    }),
+    prisma.submissionLog.findMany({
+      select: { created_at: true, result: true },
+      where: { created_at: { gte: windowStart } },
+      orderBy: { created_at: 'asc' },
+    }),
+    prisma.usuario.count({ where: { activo: true, deleted_at: null } }),
+    prisma.notificationQueue.count({ where: { sent_at: null } }),
+  ]);
+
+  // Latencia: percentiles sobre duraciones de los OK del window
+  const sortedDurations = durations.map((d) => d.duration_ms).sort((a, b) => a - b);
+  const p50 = percentile(sortedDurations, 50);
+  const p95 = percentile(sortedDurations, 95);
+  const p99 = percentile(sortedDurations, 99);
+
+  // Serie por dia para el grafico (rellena dias sin datos con 0)
+  const dayBuckets = new Map<string, { ok: number; error: number }>();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(windowStart.getTime() + i * 24 * 60 * 60 * 1000);
+    dayBuckets.set(isoDate(d), { ok: 0, error: 0 });
+  }
+  for (const row of rangeRows) {
+    const key = isoDate(row.created_at);
+    const bucket = dayBuckets.get(key);
+    if (!bucket) continue;
+    if (row.result === 'ok') bucket.ok++;
+    else bucket.error++;
+  }
+  const series = Array.from(dayBuckets.entries()).map(([date, v]) => ({
+    date,
+    ok: v.ok,
+    error: v.error,
+  }));
+
+  // Reorganizar byForm en mapa slug -> { ok, error }
+  const byFormMap = new Map<string, { ok: number; error: number }>();
+  for (const row of byForm) {
+    const slug = row.form_slug;
+    const entry = byFormMap.get(slug) ?? { ok: 0, error: 0 };
+    if (row.result === 'ok') entry.ok = row._count._all;
+    else if (row.result === 'error') entry.error = row._count._all;
+    byFormMap.set(slug, entry);
+  }
+  const byFormArr = Array.from(byFormMap.entries())
+    .map(([slug, v]) => ({ slug, ok: v.ok, error: v.error, total: v.ok + v.error }))
+    .sort((a, b) => b.total - a.total);
+
+  res.json({
+    ok: true,
+    window: { days, from: windowStart.toISOString(), to: now.toISOString() },
+    kpis: {
+      today,
+      last24hOk,
+      last24hErr,
+      windowOk,
+      windowErr,
+      windowTotal: windowOk + windowErr,
+      errorRate: windowOk + windowErr === 0 ? 0 : windowErr / (windowOk + windowErr),
+      activeUsers,
+      pendingNotifs,
+    },
+    latency: { p50, p95, p99 },
+    series,
+    byForm: byFormArr,
+    topUsers: byUser.map((u) => ({ email: u.usuario_email, count: u._count._all })),
   });
 });

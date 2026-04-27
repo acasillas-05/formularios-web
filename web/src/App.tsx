@@ -29,6 +29,9 @@ const SubmissionsPage = lazy(() =>
 const NotificationsPage = lazy(() =>
   import('./modules/admin/NotificationsPage').then((m) => ({ default: m.NotificationsPage })),
 );
+const DashboardPage = lazy(() =>
+  import('./modules/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +53,10 @@ const router = createBrowserRouter([
           { index: true, element: <Navigate to="/formularios" replace /> },
           { path: 'formularios', element: <FormsListPage /> },
           { path: 'formularios/:slug', element: <FormPage /> },
+          {
+            element: <AdminGuard />,
+            children: [{ path: 'dashboard', element: <DashboardPage /> }],
+          },
           {
             path: 'admin',
             element: <AdminGuard />,

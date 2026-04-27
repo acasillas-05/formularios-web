@@ -275,19 +275,42 @@ adminRouter.get('/submissions/:id', async (req: Request, res: Response) => {
  * ========================================================= */
 
 adminRouter.get('/notifications', async (_req: Request, res: Response) => {
-  const [pending, lastSent] = await Promise.all([
+  const [pending, lastSent, totals] = await Promise.all([
     prisma.notificationQueue.findMany({
       where: { sent_at: null },
       orderBy: { created_at: 'asc' },
-      take: 50,
+      take: 100,
     }),
     prisma.notificationQueue.findMany({
       where: { sent_at: { not: null } },
       orderBy: { sent_at: 'desc' },
-      take: 20,
+      take: 50,
+    }),
+    prisma.notificationQueue.groupBy({
+      by: ['kind'],
+      _count: { _all: true },
+      where: { sent_at: null },
     }),
   ]);
-  res.json({ ok: true, pending, lastSent });
+  res.json({ ok: true, pending, lastSent, totals });
+});
+
+/**
+ * Reencola una notificacion ya enviada (o que se quedo trabada): pone
+ * sent_at en NULL para que el worker la procese de nuevo en el siguiente tick.
+ */
+adminRouter.post('/notifications/:id/resend', async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  const existing = await prisma.notificationQueue.findUnique({ where: { id } });
+  if (!existing) {
+    res.status(404).json({ ok: false, error: 'Notificacion no encontrada' });
+    return;
+  }
+  const updated = await prisma.notificationQueue.update({
+    where: { id },
+    data: { sent_at: null },
+  });
+  res.json({ ok: true, notification: updated });
 });
 
 /* =========================================================

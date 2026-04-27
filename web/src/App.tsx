@@ -26,6 +26,9 @@ const UserFormPage = lazy(() =>
 const SubmissionsPage = lazy(() =>
   import('./modules/admin/SubmissionsPage').then((m) => ({ default: m.SubmissionsPage })),
 );
+const NotificationsPage = lazy(() =>
+  import('./modules/admin/NotificationsPage').then((m) => ({ default: m.NotificationsPage })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,6 +59,7 @@ const router = createBrowserRouter([
               { path: 'users/new', element: <UserFormPage /> },
               { path: 'users/:id', element: <UserFormPage /> },
               { path: 'auditoria', element: <SubmissionsPage /> },
+              { path: 'notifications', element: <NotificationsPage /> },
             ],
           },
           { path: '*', element: <NotFoundPage /> },

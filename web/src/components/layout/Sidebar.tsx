@@ -1,4 +1,5 @@
 import {
+  Bell,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -30,6 +31,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/users', icon: Users, label: 'Usuarios' },
       { to: '/admin/auditoria', icon: History, label: 'Auditoria' },
+      { to: '/admin/notifications', icon: Bell, label: 'Notificaciones' },
     ],
   },
 ];
